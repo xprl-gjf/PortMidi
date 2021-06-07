@@ -24,6 +24,9 @@ CHANGE LOG
 /* stdlib, stdio, unistd, and sys/types were added because they appeared
  * in a Gentoo patch, but I'm not sure why they are needed. -RBD
  */
+
+#define OP_HAVE_CLOCK_GETTIME  TRUE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -31,14 +34,20 @@ CHANGE LOG
 #include "porttime.h"
 #include "sys/time.h"
 #include "sys/resource.h"
-#include "sys/timeb.h"
 #include "pthread.h"
+#ifdef OP_HAVE_CLOCK_GETTIME
+#include <time.h>
+typedef struct timespec op_time;
+#else
+#include <syc/timeb.h>
+typedef struct timeb op_time;
+#endif
 
 #define TRUE 1
 #define FALSE 0
 
 static int time_started_flag = FALSE;
-static struct timeb time_offset = {0, 0, 0, 0};
+static op_time time_offset;
 static pthread_t pt_thread_pid;
 
 /* note that this is static data -- we only need one copy */
@@ -74,11 +83,45 @@ static void *Pt_CallbackProc(void *p)
     return NULL;
 }
 
+static inline long timediff_ms(op_time now)
+{
+#ifdef OP_HAVE_CLOCK_GETTIME
+    long seconds = now.tv_sec - time_offset.tv_sec;
+    long nanoseconds = now.tv_nsec - time_offset.tv_nsec;
+    return (seconds * 1000) + (nanoseconds / 1000l);
+#else
+    long seconds = now.time - time_offset.time;
+    long milliseconds = now.millitm - time_offset.millitm;
+    return seconds * 1000 + milliseconds;
+#endif
+}
+
+#ifdef OP_HAVE_CLOCK_GETTIME
+inline static void timespec_gettime(op_time * const now)
+{
+#ifdef CLOCK_BOOTTIME
+    if (clock_gettime(CLOCK_BOOTTIME, now) != 0)
+#endif
+#ifdef CLOCK_MONOTONIC
+    if (clock_gettime(CLOCK_MONOTONIC, now) != 0)
+#endif
+    clock_gettime(CLOCK_REALTIME, now);          /* WARNING: ignored return value */
+}
+#endif
+
+inline static void get_time(op_time * const now)
+{
+#ifdef OP_HAVE_CLOCK_GETTIME
+    timespec_gettime(now);
+#else
+    ftime(now);
+#endif
+}
 
 PtError Pt_Start(int resolution, PtCallback *callback, void *userData)
 {
     if (time_started_flag) return ptNoError;
-    ftime(&time_offset); /* need this set before process runs */
+    get_time(&time_offset); /* need this set before process runs */
     if (callback) {
         int res;
         pt_callback_parameters *parms = (pt_callback_parameters *) 
@@ -115,12 +158,9 @@ int Pt_Started()
 
 PtTimestamp Pt_Time()
 {
-    long seconds, milliseconds;
-    struct timeb now;
-    ftime(&now);
-    seconds = now.time - time_offset.time;
-    milliseconds = now.millitm - time_offset.millitm;
-    return seconds * 1000 + milliseconds;
+    op_time now;
+    get_time(&now);
+    return timediff_ms(now);
 }
 
 
