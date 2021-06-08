@@ -88,7 +88,7 @@ static inline long timediff_ms(op_time now)
 #ifdef OP_HAVE_CLOCK_GETTIME
     long seconds = now.tv_sec - time_offset.tv_sec;
     long nanoseconds = now.tv_nsec - time_offset.tv_nsec;
-    return (seconds * 1000) + (nanoseconds / 1000l);
+    return (seconds * 1000) + (nanoseconds / 1000000l);
 #else
     long seconds = now.time - time_offset.time;
     long milliseconds = now.millitm - time_offset.millitm;
